@@ -1,0 +1,13 @@
+# Version plus récente de fastapi (optionnel)
+fastapi==0.115.0            # Plus récent, plus de fonctionnalités
+
+# Ajouter sqlalchemy si vous prévoyez une base de données
+sqlalchemy==2.0.36          # Pour la base de données
+databases==0.9.0            # Pour l'async avec SQLite
+
+# Pour les tests (optionnel)
+pytest==8.3.4               # Pour écrire des tests unitaires
+httpx==0.28.1               # Pour tester l'API asynchrone
+
+# Pour les variables d'environnement (déjà présent)
+python-dotenv==1.0.0        # Parfait
