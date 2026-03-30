@@ -15,5 +15,5 @@ class TranscriptionResponse(BaseModel):
  
 
 class SummaryRequest(BaseModel):
-    transcription_id: str
+    text: str
     ratio: float = 0.3  # Pourcentage du texte à garder (30%)
