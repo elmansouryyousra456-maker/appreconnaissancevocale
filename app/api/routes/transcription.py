@@ -30,6 +30,7 @@ def get_stt_service() -> SpeechToTextService:
         stt_service = SpeechToTextService(
             model_size=settings.WHISPER_MODEL_SIZE,
             device=settings.WHISPER_DEVICE,
+            clean_audio=True,
         )
     return stt_service
 

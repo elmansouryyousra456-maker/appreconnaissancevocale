@@ -5,16 +5,24 @@ import uuid
 from pathlib import Path
 
 from app.core.config import settings
+from app.services.audio_cleaner import AudioCleaner
 from app.services.audio_preprocessor import AudioPreprocessor
 
 
 class SpeechToTextService:
-    def __init__(self, model_size: str | None = None, device: str | None = None):
+    def __init__(
+        self,
+        model_size: str | None = None,
+        device: str | None = None,
+        clean_audio: bool = True,
+    ):
         """
         Initialise le service de transcription.
         - model_size: "tiny", "base", "small", "medium", "large"
         - device: "cpu" ou "cuda"
+        - clean_audio: True pour pré-nettoyer l'audio avant transcription
         """
+        self.clean_audio = clean_audio
         model_size = model_size or settings.WHISPER_MODEL_SIZE
         device = device or settings.WHISPER_DEVICE
         compute_type = settings.WHISPER_COMPUTE_TYPE
@@ -48,15 +56,27 @@ class SpeechToTextService:
                     "processing_time": 0,
                 }
 
-            print(f"Transcription de: {audio_path}")
+            audio_to_process = audio_path
+            if self.clean_audio:
+                print(f"🧹 Nettoyage audio: {audio_path}")
+                audio_to_process = AudioCleaner.full_clean(audio_path)
+                print(f"✅ Audio nettoyé: {audio_to_process}")
+
+            print(f"Transcription de: {audio_to_process}")
             initial_prompt = prompt if prompt is not None else settings.WHISPER_DEFAULT_PROMPT
-            candidate_paths = self._build_audio_candidates(audio_path)
+            candidate_paths = self._build_audio_candidates(audio_to_process)
             try:
                 result = self._select_best_transcription(candidate_paths, language=language, prompt=initial_prompt)
             finally:
                 for candidate_path in candidate_paths[1:]:
                     if candidate_path.exists():
                         candidate_path.unlink(missing_ok=True)
+
+            if self.clean_audio and audio_to_process != audio_path and os.path.exists(audio_to_process):
+                try:
+                    os.remove(audio_to_process)
+                except OSError:
+                    pass
 
             processing_time = time.time() - start_time
             print(f"Transcription terminee en {processing_time:.2f}s")
