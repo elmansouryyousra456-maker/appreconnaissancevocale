@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from app.core.config import settings
+
 
 def test_root_endpoint(client):
     response = client.get("/")
@@ -17,12 +19,12 @@ def test_audio_upload_and_crud(client, wav_bytes):
     assert upload_response.status_code == 200
     payload = upload_response.json()
     assert payload["filename"] == "lesson.wav"
-    assert payload["status"] == "uploaded"
+    assert payload["status"] == "uploaded_and_cleaned"
     assert payload["duration"] is not None
 
     audio_id = payload["id"]
-    stored_path = Path(payload["file_path"])
-    assert stored_path.exists()
+    stored_path = Path(settings.UPLOAD_DIR) / Path(payload["file_path"]).name
+    assert stored_path.exists(), f"Fichier introuvable: {stored_path}"
 
     list_response = client.get("/api/audio")
     assert list_response.status_code == 200

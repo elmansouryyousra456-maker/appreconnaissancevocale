@@ -27,10 +27,28 @@ stt_service: SpeechToTextService | None = None
 def get_stt_service() -> SpeechToTextService:
     global stt_service
     if stt_service is None:
+        from app.services.audio_cleaner import AudioSettings
+        from app.core.config import settings
+
+        # Configuration audio adaptative depuis settings
+        audio_settings = AudioSettings(
+            clean_audio=settings.AUDIO_CLEAN_ENABLED,
+            noise_reduction_strength=settings.AUDIO_CLEAN_NOISE_REDUCTION_STRENGTH,
+            normalize_audio=settings.AUDIO_CLEAN_NORMALIZE,
+            target_sample_rate=settings.AUDIO_CLEAN_TARGET_SAMPLE_RATE,
+            mono=settings.AUDIO_CLEAN_MONO,
+            vad_enabled=settings.AUDIO_CLEAN_VAD_ENABLED,
+            vad_threshold=settings.AUDIO_CLEAN_VAD_THRESHOLD,
+            adaptive_cleaning=settings.AUDIO_CLEAN_ADAPTIVE_CLEANING,
+            light_noise_threshold=settings.AUDIO_CLEAN_LIGHT_NOISE_THRESHOLD,
+            heavy_noise_threshold=settings.AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD,
+        )
+
         stt_service = SpeechToTextService(
             model_size=settings.WHISPER_MODEL_SIZE,
             device=settings.WHISPER_DEVICE,
-            clean_audio=True,
+            clean_audio=settings.AUDIO_CLEAN_ENABLED,
+            audio_settings=audio_settings,
         )
     return stt_service
 
@@ -99,6 +117,13 @@ async def transcribe_audio(request: TranscriptionRequest):
 
         base_dir = Path(__file__).resolve().parents[3]
         audio_path = resolve_storage_path(audio_record["file_path"], base_dir)
+        
+        # Check if a cleaned version exists (from upload preprocessing)
+        cleaned_path = audio_path.parent / f"{audio_path.stem}_cleaned.wav"
+        if cleaned_path.exists():
+            audio_path = cleaned_path
+            print(f"📁 Utilisation du fichier nettoyé: {cleaned_path.name}")
+        
         if not audio_path.exists():
             raise HTTPException(status_code=404, detail="Fichier audio non trouve sur le disque")
 

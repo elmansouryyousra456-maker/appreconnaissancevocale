@@ -48,6 +48,23 @@ class Settings(BaseSettings):
     WHISPER_REPETITION_ALERT_THRESHOLD: float = 0.45
     WHISPER_MIN_LANGUAGE_CONFIDENCE: float = 0.8
     WHISPER_ALLOWED_LANGUAGES: list[str] = ["fr", "en", "ar"]
+
+    # Audio cleaning settings
+    AUDIO_CLEAN_ENABLED: bool = True
+    AUDIO_CLEAN_NOISE_REDUCTION_STRENGTH: float = 0.8
+    AUDIO_CLEAN_NORMALIZE: bool = True
+    AUDIO_CLEAN_TARGET_SAMPLE_RATE: int = 16000
+    AUDIO_CLEAN_MONO: bool = True
+    AUDIO_CLEAN_VAD_ENABLED: bool = True
+    AUDIO_CLEAN_VAD_THRESHOLD: float = 0.35
+    AUDIO_CLEAN_ADAPTIVE_CLEANING: bool = True
+    AUDIO_CLEAN_LIGHT_NOISE_THRESHOLD: float = 0.1
+    AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD: float = 0.3
+
+    # Whisper forced settings
+    WHISPER_FORCE_LANGUAGE: str | None = "fr"
+    WHISPER_FORCE_TASK: str = "transcribe"
+    WHISPER_ENABLE_TIMESTAMPS: bool = True
     TRANSCRIPTION_MAX_SYMBOL_RATIO: float = 0.35
     WHISPER_DEFAULT_PROMPT: str = ""
     SUMMARY_LANGUAGE: str = "french"

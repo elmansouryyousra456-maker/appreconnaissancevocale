@@ -14,8 +14,8 @@ from app.core.database import (
     update_audio_record,
 )
 from app.models.audio import AudioResponse, AudioUpdate, DeleteResponse
+from app.services.audio_cleaner import AudioCleaner, AudioSettings
 from app.services.audio_metadata import get_audio_duration
-from app.services.audio_preprocessor import AudioPreprocessor
 from app.services.file_handler import resolve_storage_path, save_upload_file
 
 router = APIRouter(prefix="/api/audio", tags=["Audio"])
@@ -99,30 +99,52 @@ async def upload_audio(file: UploadFile = File(...)):
     
     # Get full path to the saved audio file
     original_file_path = BASE_DIR / saved_file["file_path"]
-    preprocessor = AudioPreprocessor()
+    
+    # Configuration audio adaptative
+    audio_settings = AudioSettings(
+        clean_audio=settings.AUDIO_CLEAN_ENABLED,
+        noise_reduction_strength=settings.AUDIO_CLEAN_NOISE_REDUCTION_STRENGTH,
+        normalize_audio=settings.AUDIO_CLEAN_NORMALIZE,
+        target_sample_rate=settings.AUDIO_CLEAN_TARGET_SAMPLE_RATE,
+        mono=settings.AUDIO_CLEAN_MONO,
+        vad_enabled=settings.AUDIO_CLEAN_VAD_ENABLED,
+        vad_threshold=settings.AUDIO_CLEAN_VAD_THRESHOLD,
+        adaptive_cleaning=settings.AUDIO_CLEAN_ADAPTIVE_CLEANING,
+        light_noise_threshold=settings.AUDIO_CLEAN_LIGHT_NOISE_THRESHOLD,
+        heavy_noise_threshold=settings.AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD,
+    )
+    cleaner = AudioCleaner(audio_settings)
     
     # Initialize final path to original (fallback)
     final_file_path = saved_file["file_path"]
-    
+    final_status = "uploaded"
+
     try:
-        # Perform noise cleaning with aggressive settings for better transcription
-        cleaned_audio_path = preprocessor.prepare_for_transcription(str(original_file_path), aggressive=True)
-        
-        # Save the cleaned audio in the same directory
-        cleaned_audio_path_final = original_file_path.parent / f"{original_file_path.stem}_cleaned.wav"
-        
-        # Move cleaned audio to final location
-        if cleaned_audio_path.exists() and cleaned_audio_path != original_file_path:
-            shutil.move(str(cleaned_audio_path), str(cleaned_audio_path_final))
-            # Update the path to use the cleaned version
-            final_file_path = str(cleaned_audio_path_final.relative_to(BASE_DIR))
-            print(f"✓ Audio nettoyé: {original_file_path.name} -> {cleaned_audio_path_final.name}")
-        
+        cleaned_audio_path = cleaner.full_clean(str(original_file_path))
+
+        if cleaned_audio_path != str(original_file_path):
+            cleaned_audio_path = Path(cleaned_audio_path)
+
+            if cleaned_audio_path.exists():
+                cleaned_audio_path_final = UPLOAD_DIR / f"{original_file_path.stem}_cleaned.wav"
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy(str(cleaned_audio_path), str(cleaned_audio_path_final))
+
+                if cleaned_audio_path_final.exists():
+                    final_file_path = str(cleaned_audio_path_final.relative_to(BASE_DIR))
+                    final_status = "uploaded_and_cleaned"
+                    print(f"✓ Audio nettoyé: {original_file_path.name} -> {cleaned_audio_path_final}")
+                else:
+                    print(f"⚠ Fichier cleaned introuvable après copy: {cleaned_audio_path_final}")
+            else:
+                print(f"⚠ Fichier temporaire cleaned introuvable: {cleaned_audio_path}")
+
     except Exception as e:
-        print(f"⚠ Erreur nettoyage: {e}, utilisation du fichier original")
+        print(f"Erreur nettoyage: {e}, utilisation du fichier original")
         final_file_path = saved_file["file_path"]
+        final_status = "uploaded"
     
-    # Get duration (use original path if cleaned version wasn't created)
+       # Get duration (use original path if cleaned version wasn't created)
     file_for_duration = BASE_DIR / final_file_path
     duration = get_audio_duration(str(file_for_duration))
 
@@ -132,7 +154,7 @@ async def upload_audio(file: UploadFile = File(...)):
         duration=duration,
         size=saved_file["file_size"],
         file_path=final_file_path,
-        status="uploaded_and_cleaned",
+        status=final_status,
     )
 
     return AudioResponse(
@@ -142,5 +164,5 @@ async def upload_audio(file: UploadFile = File(...)):
         size=saved_file["file_size"],
         file_path=final_file_path,
         created_at=created_at,
-        status="uploaded_and_cleaned",
+        status=final_status,
     )

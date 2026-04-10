@@ -1,11 +1,21 @@
 import os
 import re
+class AudioCleaner:
+    @staticmethod
+    def reduce_noise():  # Réduction bruit avec noisereduce
+        pass
+    @staticmethod  
+    def apply_bandpass_filter():  # Filtre passe-bande voix (300-3400Hz)
+        pass
+    @staticmethod
+    def full_clean():  # Pipeline complet
+        pass
 import time
 import uuid
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.audio_cleaner import AudioCleaner
+from app.services.audio_cleaner import AudioCleaner, AudioSettings
 from app.services.audio_preprocessor import AudioPreprocessor
 
 
@@ -15,17 +25,35 @@ class SpeechToTextService:
         model_size: str | None = None,
         device: str | None = None,
         clean_audio: bool = True,
+        audio_settings: AudioSettings | None = None,
     ):
         """
         Initialise le service de transcription.
         - model_size: "tiny", "base", "small", "medium", "large"
         - device: "cpu" ou "cuda"
         - clean_audio: True pour pré-nettoyer l'audio avant transcription
+        - audio_settings: Configuration personnalisée du nettoyage audio
         """
         self.clean_audio = clean_audio
         model_size = model_size or settings.WHISPER_MODEL_SIZE
         device = device or settings.WHISPER_DEVICE
         compute_type = settings.WHISPER_COMPUTE_TYPE
+
+        # Configuration audio adaptative
+        if audio_settings is None:
+            audio_settings = AudioSettings(
+                clean_audio=settings.AUDIO_CLEAN_ENABLED,
+                noise_reduction_strength=settings.AUDIO_CLEAN_NOISE_REDUCTION_STRENGTH,
+                normalize_audio=settings.AUDIO_CLEAN_NORMALIZE,
+                target_sample_rate=settings.AUDIO_CLEAN_TARGET_SAMPLE_RATE,
+                mono=settings.AUDIO_CLEAN_MONO,
+                vad_enabled=settings.AUDIO_CLEAN_VAD_ENABLED,
+                vad_threshold=settings.AUDIO_CLEAN_VAD_THRESHOLD,
+                adaptive_cleaning=settings.AUDIO_CLEAN_ADAPTIVE_CLEANING,
+                light_noise_threshold=settings.AUDIO_CLEAN_LIGHT_NOISE_THRESHOLD,
+                heavy_noise_threshold=settings.AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD,
+            )
+        self.audio_cleaner = AudioCleaner(audio_settings)
         print(f"Chargement du modele Whisper ({model_size})...")
         try:
             from faster_whisper import WhisperModel
@@ -58,8 +86,8 @@ class SpeechToTextService:
 
             audio_to_process = audio_path
             if self.clean_audio:
-                print(f"🧹 Nettoyage audio: {audio_path}")
-                audio_to_process = AudioCleaner.full_clean(audio_path)
+                print(f"🧹 Nettoyage audio adaptatif: {audio_path}")
+                audio_to_process = self.audio_cleaner.full_clean(audio_path)
                 print(f"✅ Audio nettoyé: {audio_to_process}")
 
             print(f"Transcription de: {audio_to_process}")
@@ -171,6 +199,10 @@ class SpeechToTextService:
         temperature: float,
         condition_on_previous_text: bool,
     ) -> dict:
+        # Forcer la langue et le task selon la configuration
+        forced_language = settings.WHISPER_FORCE_LANGUAGE
+        forced_task = settings.WHISPER_FORCE_TASK
+
         transcribe_kwargs = {
             "beam_size": beam_size,
             "best_of": best_of,
@@ -182,8 +214,19 @@ class SpeechToTextService:
             "log_prob_threshold": settings.WHISPER_LOG_PROB_THRESHOLD,
             "compression_ratio_threshold": settings.WHISPER_COMPRESSION_RATIO_THRESHOLD,
         }
-        if language:
-            transcribe_kwargs["language"] = language
+
+        # Priorité : langue forcée > langue passée en paramètre > détection automatique
+        final_language = forced_language or language
+        if final_language:
+            transcribe_kwargs["language"] = final_language
+
+        # Forcer le task si configuré
+        if forced_task:
+            transcribe_kwargs["task"] = forced_task
+
+        # Activer timestamps si configuré
+        if settings.WHISPER_ENABLE_TIMESTAMPS:
+            transcribe_kwargs["word_timestamps"] = True
 
         segments, info = self.model.transcribe(
             audio_path,
