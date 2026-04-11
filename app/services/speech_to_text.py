@@ -1,15 +1,5 @@
 import os
 import re
-class AudioCleaner:
-    @staticmethod
-    def reduce_noise():  # Réduction bruit avec noisereduce
-        pass
-    @staticmethod  
-    def apply_bandpass_filter():  # Filtre passe-bande voix (300-3400Hz)
-        pass
-    @staticmethod
-    def full_clean():  # Pipeline complet
-        pass
 import time
 import uuid
 from pathlib import Path
@@ -27,19 +17,11 @@ class SpeechToTextService:
         clean_audio: bool = True,
         audio_settings: AudioSettings | None = None,
     ):
-        """
-        Initialise le service de transcription.
-        - model_size: "tiny", "base", "small", "medium", "large"
-        - device: "cpu" ou "cuda"
-        - clean_audio: True pour pré-nettoyer l'audio avant transcription
-        - audio_settings: Configuration personnalisée du nettoyage audio
-        """
         self.clean_audio = clean_audio
         model_size = model_size or settings.WHISPER_MODEL_SIZE
         device = device or settings.WHISPER_DEVICE
         compute_type = settings.WHISPER_COMPUTE_TYPE
 
-        # Configuration audio adaptative
         if audio_settings is None:
             audio_settings = AudioSettings(
                 clean_audio=settings.AUDIO_CLEAN_ENABLED,
@@ -53,7 +35,10 @@ class SpeechToTextService:
                 light_noise_threshold=settings.AUDIO_CLEAN_LIGHT_NOISE_THRESHOLD,
                 heavy_noise_threshold=settings.AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD,
             )
+
         self.audio_cleaner = AudioCleaner(audio_settings)
+        self.preprocessor = AudioPreprocessor()
+
         print(f"Chargement du modele Whisper ({model_size})...")
         try:
             from faster_whisper import WhisperModel
@@ -67,13 +52,15 @@ class SpeechToTextService:
             raise RuntimeError(
                 "Impossible de charger faster-whisper. Verifiez les dependances et le modele configure."
             ) from exc
-        self.preprocessor = AudioPreprocessor()
+
         print("Modele Whisper charge avec succes")
 
-    async def transcribe(self, audio_path: str, language: str | None = None, prompt: str | None = None):
-        """
-        Transcrit un fichier audio en texte avec Whisper.
-        """
+    async def transcribe(
+        self,
+        audio_path: str,
+        language: str | None = None,
+        prompt: str | None = None,
+    ):
         start_time = time.time()
 
         try:
@@ -85,22 +72,36 @@ class SpeechToTextService:
                 }
 
             audio_to_process = audio_path
+
             if self.clean_audio:
-                print(f"🧹 Nettoyage audio adaptatif: {audio_path}")
-                audio_to_process = self.audio_cleaner.full_clean(audio_path)
-                print(f"✅ Audio nettoyé: {audio_to_process}")
+                print(f"Nettoyage audio adaptatif: {audio_path}")
+                cleaned_path = self.audio_cleaner.full_clean(audio_path)
+                if cleaned_path and os.path.exists(cleaned_path):
+                    audio_to_process = cleaned_path
+                    print(f"Audio nettoye: {audio_to_process}")
 
             print(f"Transcription de: {audio_to_process}")
+
             initial_prompt = prompt if prompt is not None else settings.WHISPER_DEFAULT_PROMPT
             candidate_paths = self._build_audio_candidates(audio_to_process)
+
             try:
-                result = self._select_best_transcription(candidate_paths, language=language, prompt=initial_prompt)
+                result = self._select_best_transcription(
+                    candidate_paths=candidate_paths,
+                    language=language,
+                    prompt=initial_prompt,
+                )
             finally:
                 for candidate_path in candidate_paths[1:]:
                     if candidate_path.exists():
                         candidate_path.unlink(missing_ok=True)
 
-            if self.clean_audio and audio_to_process != audio_path and os.path.exists(audio_to_process):
+            if (
+                self.clean_audio
+                and audio_to_process != audio_path
+                and os.path.exists(audio_to_process)
+                and "_cleaned" not in str(audio_path)
+            ):
                 try:
                     os.remove(audio_to_process)
                 except OSError:
@@ -124,24 +125,28 @@ class SpeechToTextService:
             return {
                 "error": str(e),
                 "text": "",
-                "processing_time": time.time() - start_time,
+                "processing_time": round(time.time() - start_time, 2),
             }
 
     def _build_audio_candidates(self, audio_path: str) -> list[Path]:
         original = Path(audio_path)
         candidates = [original]
-        
-        # If audio is already preprocessed during upload, skip additional preprocessing
+
         is_preprocessed = "_cleaned" in str(audio_path)
-        
+
         if settings.AUDIO_PREPROCESS_ENABLED and not is_preprocessed:
             standard = self.preprocessor.prepare_for_transcription(audio_path, aggressive=False)
             aggressive = self.preprocessor.prepare_for_transcription(audio_path, aggressive=True)
             candidates.extend([standard, aggressive])
-        
+
         return candidates
 
-    def _select_best_transcription(self, candidate_paths: list[Path], language: str | None, prompt: str | None) -> dict:
+    def _select_best_transcription(
+        self,
+        candidate_paths: list[Path],
+        language: str | None,
+        prompt: str | None,
+    ) -> dict:
         attempts: list[tuple[float, dict]] = []
 
         decode_profiles = [
@@ -172,10 +177,15 @@ class SpeechToTextService:
                     temperature=profile["temperature"],
                     condition_on_previous_text=profile["condition_on_previous_text"],
                 )
-                score = self._score_transcription(result["text"], result["segments"], result["language_probability"])
+                score = self._score_transcription(
+                    result["text"],
+                    result["segments"],
+                    result["language_probability"],
+                )
                 attempts.append((score, result))
 
         best_score, best_result = max(attempts, key=lambda item: item[0])
+
         warnings = self._build_quality_warnings(
             text=best_result["text"],
             segments=best_result["segments"],
@@ -184,6 +194,7 @@ class SpeechToTextService:
             requested_language=language,
             score=best_score,
         )
+
         if warnings:
             best_result["warning"] = " ".join(warnings)
 
@@ -199,7 +210,6 @@ class SpeechToTextService:
         temperature: float,
         condition_on_previous_text: bool,
     ) -> dict:
-        # Forcer la langue et le task selon la configuration
         forced_language = settings.WHISPER_FORCE_LANGUAGE
         forced_task = settings.WHISPER_FORCE_TASK
 
@@ -215,23 +225,17 @@ class SpeechToTextService:
             "compression_ratio_threshold": settings.WHISPER_COMPRESSION_RATIO_THRESHOLD,
         }
 
-        # Priorité : langue forcée > langue passée en paramètre > détection automatique
-        final_language = forced_language or language
+        final_language = forced_language if forced_language else language
         if final_language:
             transcribe_kwargs["language"] = final_language
 
-        # Forcer le task si configuré
         if forced_task:
             transcribe_kwargs["task"] = forced_task
 
-        # Activer timestamps si configuré
         if settings.WHISPER_ENABLE_TIMESTAMPS:
             transcribe_kwargs["word_timestamps"] = True
 
-        segments, info = self.model.transcribe(
-            audio_path,
-            **transcribe_kwargs,
-        )
+        segments, info = self.model.transcribe(audio_path, **transcribe_kwargs)
 
         full_text = ""
         segments_list = []
@@ -240,6 +244,7 @@ class SpeechToTextService:
             segment_text = self._normalize_text(segment.text)
             if not segment_text:
                 continue
+
             full_text += segment_text + " "
             segments_list.append(
                 {
@@ -279,15 +284,17 @@ class SpeechToTextService:
             repeated_segments = sum(1 for item in segment_texts if segment_texts.count(item) > 1)
             if repeated_segments >= max(2, len(segment_texts) // 3):
                 return True
+
             prefix_counts: dict[str, int] = {}
             for segment_text in segment_texts:
                 prefix = " ".join(segment_text.split()[:5])
                 if prefix:
                     prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+
             if prefix_counts and max(prefix_counts.values()) >= max(3, len(segment_texts) // 3):
                 return True
 
-        fourgrams = [" ".join(normalized[i : i + 4]) for i in range(len(normalized) - 3)]
+        fourgrams = [" ".join(normalized[i:i + 4]) for i in range(len(normalized) - 3)]
         if fourgrams:
             repeated_fourgrams = len(fourgrams) - len(set(fourgrams))
             if repeated_fourgrams / len(fourgrams) > 0.18:
@@ -310,7 +317,7 @@ class SpeechToTextService:
 
         score = (
             unique_ratio * 0.55
-            + min(language_probability, 1.0) * 0.2
+            + min(language_probability, 1.0) * 0.20
             + min(avg_segment_len / 12.0, 1.0) * 0.25
             - repetition_penalty
         )
@@ -329,20 +336,17 @@ class SpeechToTextService:
         warnings: list[str] = []
 
         if cls._looks_repetitive(text, segments):
-            warnings.append(
-                "Transcription instable detectee: bruit ou repetitions anormales."
-            )
+            warnings.append("Transcription instable detectee: bruit ou repetitions anormales.")
 
         if cls._has_suspicious_characters(text):
-            warnings.append(
-                "Texte potentiellement corrompu detecte: caracteres anormaux ou non linguistiques."
-            )
+            warnings.append("Texte potentiellement corrompu detecte: caracteres anormaux ou non linguistiques.")
 
-        if requested_language is None:
+        if requested_language is None and not settings.WHISPER_FORCE_LANGUAGE:
             if language_probability < settings.WHISPER_MIN_LANGUAGE_CONFIDENCE:
                 warnings.append(
                     f"Detection automatique de langue peu fiable ({language_probability:.2f})."
                 )
+
             if settings.WHISPER_ALLOWED_LANGUAGES and detected_language not in settings.WHISPER_ALLOWED_LANGUAGES:
                 allowed = ", ".join(settings.WHISPER_ALLOWED_LANGUAGES)
                 warnings.append(
@@ -368,10 +372,6 @@ class SpeechToTextService:
         word_chars = sum(1 for char in cleaned if char.isalpha() or char.isdigit())
         symbol_ratio = 1 - (word_chars / len(cleaned))
         if symbol_ratio > settings.TRANSCRIPTION_MAX_SYMBOL_RATIO:
-            return True
-
-        non_latin_letters = sum(1 for char in cleaned if char.isalpha() and ord(char) > 591)
-        if non_latin_letters / len(cleaned) > 0.3:
             return True
 
         return False

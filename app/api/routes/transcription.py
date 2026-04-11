@@ -26,11 +26,10 @@ stt_service: SpeechToTextService | None = None
 
 def get_stt_service() -> SpeechToTextService:
     global stt_service
+
     if stt_service is None:
         from app.services.audio_cleaner import AudioSettings
-        from app.core.config import settings
 
-        # Configuration audio adaptative depuis settings
         audio_settings = AudioSettings(
             clean_audio=settings.AUDIO_CLEAN_ENABLED,
             noise_reduction_strength=settings.AUDIO_CLEAN_NOISE_REDUCTION_STRENGTH,
@@ -50,6 +49,7 @@ def get_stt_service() -> SpeechToTextService:
             clean_audio=settings.AUDIO_CLEAN_ENABLED,
             audio_settings=audio_settings,
         )
+
     return stt_service
 
 
@@ -117,19 +117,19 @@ async def transcribe_audio(request: TranscriptionRequest):
 
         base_dir = Path(__file__).resolve().parents[3]
         audio_path = resolve_storage_path(audio_record["file_path"], base_dir)
-        
-        # Check if a cleaned version exists (from upload preprocessing)
+
+        # Utiliser le fichier nettoyé si déjà généré pendant l'upload
         cleaned_path = audio_path.parent / f"{audio_path.stem}_cleaned.wav"
         if cleaned_path.exists():
             audio_path = cleaned_path
-            print(f"📁 Utilisation du fichier nettoyé: {cleaned_path.name}")
-        
+            print(f"Utilisation du fichier nettoye: {cleaned_path.name}")
+
         if not audio_path.exists():
             raise HTTPException(status_code=404, detail="Fichier audio non trouve sur le disque")
 
-        # Handle empty language string
-        language = request.language if request.language and request.language.strip() else None
-        
+        # Si langue vide, laisser None puis Whisper prendra la langue forcée depuis settings
+        language = request.language.strip() if request.language and request.language.strip() else None
+
         result = await get_stt_service().transcribe(
             str(audio_path),
             language=language,
@@ -145,7 +145,7 @@ async def transcribe_audio(request: TranscriptionRequest):
             audio_id=request.audio_id,
             text=result["text"],
             language=result["language"],
-            segments=result.get("segments"),
+            segments=result.get("segments", []),
             confidence=result.get("language_probability", 0.0),
             processing_time=result["processing_time"],
             created_at=created_at,
