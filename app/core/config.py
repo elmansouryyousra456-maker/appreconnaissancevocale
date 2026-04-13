@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     AUDIO_CLEAN_HEAVY_NOISE_THRESHOLD: float = 0.3
 
     # Whisper forced settings
-    WHISPER_FORCE_LANGUAGE: str | None = "fr"
+    WHISPER_FORCE_LANGUAGE: str | None = None  
     WHISPER_FORCE_TASK: str = "transcribe"
     WHISPER_ENABLE_TIMESTAMPS: bool = True
     TRANSCRIPTION_MAX_SYMBOL_RATIO: float = 0.35

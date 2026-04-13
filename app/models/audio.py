@@ -28,9 +28,11 @@ class AudioUpdate(BaseModel):
     status: Optional[str] = None
 
 
+from typing import Literal  
+
 class TranscriptionRequest(BaseModel):
     audio_id: str
-    language: Optional[str] = None
+    language: Optional[Literal["fr", "en", "ar"]] = None  
     prompt: Optional[str] = None
 
 
